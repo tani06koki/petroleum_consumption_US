@@ -1,0 +1,630 @@
+---
+title: "The Impact of COVID-19 on Petroleum Consumption by the Industrial Sector in the United States"
+subtitle: "Timeseries Analysis"
+format: html
+author: "Koki Taniguchi"
+editor: visual
+html:
+toc: true         # Enable the Table of Contents
+toc-depth: 2        # Set depth of headers to include (e.g., H1, H2)
+number-sections: true
+toc-location: left
+code-fold: true
+code-summary: "Show the code"
+code-overflow: wrap
+execute:
+  echo: false
+---
+
+## Introduction
+
+This research investigates the impact of the COVID-19 pandemic on petroleum consumption in the industrial sector in the U.S. The pandemic resulted in significant alterations in global energy demand, leading to shifts in petroleum usage patterns driven by lockdowns, mobility restrictions, and changes in work and lifestyle habits. Understanding these impacts is crucial for several reasons. The industrial sector faced disruptions in production that altered its energy needs. This shifts not only influence short-term energy demand but also have long-term implications for energy policy, economic recovery, and sustainability planning.
+
+The analysis will be conducted through multiple stages, beginning with data acquisition and cleaning from the U.S. Energy Information Administration (EIA). Following this, we will explore the time series data and preprocess it to prepare for analysis. Subsequently, ARIMA modeling, along with Auto-ETS and Auto-ARIMA models, will be applied to determine the best forecasting model for petroleum consumption. The final stage will involve a comparative analysis of the forecasted values against actual data during the COVID-19 period.
+
+Understanding the shifts in energy consumption caused by COVID-19 is essential as it provides insights into the resilience and adaptability of different sectors to sudden economic shocks. Additionally, analyzing the pandemic's effects on energy consumption is vital for shaping energy policy and planning. By identifying how this sector responded to the crisis, policymakers and energy providers can develop effective strategies for managing future disruptions, ensuring energy security, and supporting a transition toward more sustainable energy systems. Furthermore, comprehending the economic implications of these shifts is crucial for informing post-pandemic recovery strategies that promote efficient energy use while fostering economic growth.
+
+## Data Cleaning
+
+### Libraries
+
+```{r}
+#| echo: true
+#| warning: false
+library(fpp2)
+library(tidyverse)
+library(forecast)
+library(readxl)
+library(openxlsx)
+```
+
+### Import Data
+
+```{r}
+#| echo: true
+#| warning: false
+# Import Data
+data_industrial <- read_csv("data/MER_T03_07B.csv")%>%
+  mutate(Description = as.factor(Description))
+```
+
+### Data Cleaning
+
+```{r}
+#| echo: true
+#| warning: false
+# Check the Description to filter 
+levels(data_industrial$Description) # "Total Petroleum Consumed by the Industrial Sector" 
+
+
+# Data Cleaning
+industrial <- data_industrial %>%
+  filter(Description == "Total Petroleum Consumed by the Industrial Sector") %>% 
+  mutate(Month = as.Date(ym(as.character(YYYYMM)))) %>% # ignore the error because of the average rows
+  mutate(Value = as.numeric(Value)) %>%
+  filter(!is.na(Month)) %>% # MM = 13 refers to the average consumption of the year
+  select(Month, Value)
+```
+
+### Convert to a Time Series
+
+```{r}
+#| echo: true
+#| warning: false
+# Make it timeseries
+industial_ts <- ts(industrial[, -1], start=c(1973,1), frequency=12)
+
+# Summary
+summary(industial_ts)
+```
+
+## Visualization
+
+### Autoplot
+
+```{r}
+#| echo: true
+#| warning: false
+### Autoplot
+autoplot(industial_ts)+
+  ggtitle("Total Petroleum Consumed by the Industrial Sector") +
+  xlab("Time") + ylab("Total Petroleum (Thousand Barrels per Day)")
+
+```
+
+According to Figure above, four non-linear upward trends can be observed during the periods 1975-1980, 1983-2000, 2004-2007, and 2010-2024, as the intervals of the data movement are not constant, which might be cyclical. In terms of seasonality, no clear seasonal patterns are evident, as there are no recurring patterns at fixed intervals.
+
+### Seasonal Plot
+
+```{r}
+#| echo: true
+#| warning: false
+### Seasonal Plot
+ggseasonplot(industial_ts) +
+  ggtitle("Seasonal Plot of the Total Petroleum Consumed by the Industrial Sector")+
+  xlab("Month") + ylab("Total Petroleum (Thousand Barrels per Day)")  +
+  theme(
+    legend.text = element_text(size = 6),       # Adjusts the legend text size
+    legend.title = element_text(size = 8),      # Adjusts the legend title size
+    legend.key.size = unit(0.5, "lines")       # Shrinks the legend key box size
+  )
+```
+
+As observed in the auto plot, we also do not observe the clear seasonality in the monthly seasonal plot above. This suggests that the petroleum consumption in the industrial sector is not influenced by specific seasons or months. It can also be inferred that the industrial sector experiences consistent demand throughout the year, regardless of seasonal factors, likely due to the nature of its projects and operations.
+
+### ACF Plot
+
+```{r}
+#| echo: true
+#| warning: false
+### ggAcf
+ggAcf(industial_ts) +
+  ggtitle("ACF Plot of the Total Petroleum Consumed by the Industrial Sector")
+```
+
+The ACF plot of total petroleum consumed by the industrial sector reveals important characteristics about the time series data. The significant positive autocorrelation at lag 1 indicates that the current petroleum consumption is strongly correlated with the consumption from the previous period. This suggests a high degree of persistence, where consumption values from one period are closely related to the next. The gradual decline in autocorrelation over subsequent lags, combined with the wave-like pattern, points to possible cyclic or seasonal behavior. The significant spikes that remain above the confidence intervals at various lags imply that past values up to approximately lag 12 still influence future consumption patterns, indicating the presence of long-term dependencies in the data. This suggests that petroleum consumption in the industrial sector may follow a regular pattern over time, possibly influenced by recurring industrial activity or demand cycles.
+
+## Data Selection
+
+### Modelling Data set
+
+As the current upward trend began in the beginning of 2010, the full data set is defined from January 2010 to December 2019 until the pandemic started.
+
+-   **Period**: January 2010 - December 2019
+
+-   **Split Portion**: 80:20 (Training : Test set)
+
+-   **Training set length**: 96months
+
+-   **Test set length**: 24months
+
+```{r}
+#| echo: true
+#| warning: false
+# Filter the data to start from 2010 and change the data type to Date
+industrial_2010 <- industrial %>%
+  filter(Month >= as.Date("2010-01-01"))
+
+# Create time series objects from 2010 onwards
+industrial_ts_2010 <- ts(industrial_2010[, -1], start=c(2010,1), frequency=12)
+
+# using precovid data as the Full_Dataset
+Full_Dataset_industrial <- window(industrial_ts_2010, end=c(2019,12))
+
+
+### Industrial Sector
+train_industrial <- window(industrial_ts_2010, end = c(2017,12))
+test_industrial <- window(industrial_ts_2010, start = c(2018,1), end = c(2019,12))
+
+#check number of observations
+length(train_industrial) # 96 (80%)
+length(test_industrial) # 24 (20%)
+```
+
+### Covid-19 Data Set
+
+For this analysis, we focus on the period from January 2010 onward for all petroleum consumption data in the industrial sector. This timeframe captures both pre- and post-COVID-19 periods, enabling us to evaluate the potential shifts caused by the pandemic and external shocks. The subset of data from January 2010 to April 2024 is named Full_Dataset_Industrial.
+
+The period from 2010 to 2024 was strategically chosen to focus on contemporary trends, particularly the disruptions caused by the COVID-19 pandemic. While previous global events, such as the Japanese asset price bubble, the dot-com bubble, and the subprime mortgage crisis, had profound impacts on economic activity and energy demand, including data from those periods would likely introduce structural breaks unrelated to the COVID-19 crisis. Such breaks could complicate the interpretation of pandemic-specific effects on petroleum consumption. By limiting our analysis to 2010 onwards, we avoid introducing unrelated outliers or breaks from earlier periods, ensuring that the results are more focused on the modern post-COVID energy landscape.
+
+-   **Period**: January 2020 - December 2022
+
+```{r}
+#| echo: true
+#| warning: false
+Covid_Period_industrial <- window(industrial_ts_2010, start = c(2020,1), end=c(2024,5))
+```
+
+Additionally, the COVID-19 period is defined as January 2021 to December 2022, encompassing both the height of the pandemic and the early recovery phase. This period is critical for analyzing how the pandemic altered seasonal trends and consumption behaviors across all three sectors. By splitting the dataset into pre-COVID (January 2010 to December 2019) and post-COVID (January 2020 onward) segments, we can compare these distinct phases. This approach isolates the pandemic's effects on petroleum consumption while avoiding the noise of unrelated historical events, thereby enhancing the precision and relevance of our analysis.
+
+### Plot
+
+```{r}
+#| echo: true
+#| warning: false
+# Visualization for 2010 onwards
+autoplot(industrial_ts_2010) + 
+  autolayer(train_industrial, series = "Training Set") +
+  autolayer(test_industrial, series = "Test Set") +
+  autolayer(Covid_Period_industrial, series="Covid-19") +
+  ggtitle("Industrial Sector Petroleum Consumption (2010 onwards)") +
+  ylab("Petroleum Consumption")
+```
+
+## Data Preparation
+
+### Stationary Process
+
+#### Box-Cox Transformation
+
+In the above plot, we observe a non-linear upward trend through train and test dataset, however, we are unable to observe a seasonality since this data does not show any particular pattern in a fixed duration. Therefore, we do not consider Box-Cox transformation since the purpose of the transformation is to simplify the patterns in the historical data by removing known sources of variation; however, the patterns are unknown as a clear seasonality does not seems to exist.
+
+```{r}
+#| echo: true
+#| warning: false
+## Box-Cox Transformation
+
+#gain the lambdal value for Industrial industry
+bc_lambda2<- BoxCox.lambda(train_industrial)
+bc_lambda2
+
+#Do the BC- transformation for Industrial industry
+train_industrial %>%  BoxCox(lambda= bc_lambda2) %>% ggtsdisplay()
+
+# without BC transformation
+train_industrial %>% ggtsdisplay() 
+```
+
+Initially, we tried applying the Box-Cox transformation using the lambda value generated by R, which was 1.999924. However, after comparing the plots before and after the transformation, we noticed only a slight change in variance. The difference between the two was negligible. As a result, we decided not to use the Box-Cox transformation for variance stabilization. Therefore, we choose to skip the Box-Cox transformation (Hyndman & Athanasopoulos, 2021).
+
+#### Differencing Process
+
+Next, we focused on stationarity concerning the stability of the mean and patterns. The primary goal of preparing the dataset for ARIMA analysis is to transform the data into a stationary process. This means ensuring that the mean remains constant, the variance is stable, and there are no predictable patterns over time.
+
+```{r}
+#| echo: true
+#| warning: false
+## Differencing
+
+#check whether a seasonal difference is needed for industrial industry
+train_industrial %>% nsdiffs() # 0: no seasonal differencing is recommended  
+
+train_industrial %>% ggtsdisplay() # However clear seasonality in ACF and PACF
+
+```
+
+In both the PACF and ACF plots, significant autocorrelation at lag 12 was confirmed, indicating the presence of a seasonal pattern in the data. To verify this, the nsdiffs() function was used to calculate the seasonal differencing, but the result was displayed as 0. However, due to the prominent seasonal differencing at lag 12, it was confirmed that seasonal differencing was necessary. By performing seasonal differencing, the goal was to eliminate the seasonal structure and ensure that the mean remained stable over time.
+
+```{r}
+#| echo: true
+#| warning: false
+#check whether a first difference is needed
+train_industrial %>% diff(lag=12) %>% ndiffs() # Additional lag 0 differencing is recommended
+
+# Result plot
+train_industrial %>% diff(lag=12) %>% ggtsdisplay()
+```
+
+Finally, after performing seasonal differencing (lag 12), it was confirmed that the mean became stable, the variance remained stable, and no long-term predictable patterns were observed.
+
+At this point, the ndiffs() function was used to check whether additional differencing was required to stabilize the data. The result indicated that no further differencing was necessary, confirming that the data had already reached a stationary state. Therefore, by applying seasonal differencing at lag 12 (D=1) and no need for first-order differencing (d=0), the series became stationary with d=0, D=1, and d+D=1.
+
+## Model Selection
+
+### Pure AR Model
+
+```{r}
+#| echo: true
+#| warning: false
+# pure AR model(1): ARIMA(1,0,0)(1,1,0)[12]
+fit_industrial1 <- Arima(train_industrial, order = c(1,0,0), season = c(1,1,0))
+```
+
+For the AR model in the industrial sector, upon analysing the PACF plot, significant spikes were observed at lag 1, which suggest a non-seasonal AR (1) model component (p=1). Also, there is a spike in the PACF at lag 12, but not at lag 24. This suggests a seasonal AR (0) model component (P=1). All these led us to construct an ARIMA (1,0,0) (1,1,0) \[12\] model, which involves a seasonal differencing (d=0, D=1) .
+
+#### Ljung-Box Test
+
+```{r}
+#| echo: true
+#| warning: false
+# ljung-box test
+checkresiduals(fit_industrial1) # ARIMA(1,0,0)(1,1,0)[12]: Pass
+```
+
+We will use the checkresiduals() function to verify if the residuals of these models meet the criteria for white noise by ljung-box test.
+
+-   H0: There is no autocorrelation in the residuals.
+
+-   H1: At least one of the autocorrelations in the residuals up to 19 lags.
+
+For the pure AR model, the mean of the residual appears to be close to zero, and the variance seems to be constant. Additionally, according to the results of the Ljung-Box test, the p-value for fit_industry1 is 0.5711. Since the p-value is more than 0.05, there is insufficient evidence to reject the null hypothesis that there is no autocorrelation in the residuals, indicating that the residuals can be considered white noise. Therefore, re-identification is not necessary for the model.
+
+### Pure MA Model
+
+```{r}
+#| echo: true
+#| warning: false
+#| include: false
+## Pure MA Model
+# pure MA model(1): ARIMA(0,0,1)(0,1,1)[12]
+fit_industrial2 <- Arima(train_industrial, order = c(0,0,1), season = c(0,1,1))
+```
+
+For the pure MA model, we examine the ACF plot and find spikes at lag 1 and 4, indicating a non-seasonal MA (1) model with component (q=1). This pure MA model also does not have a seasonal model since the ACF plot does not show any spikes at 12 and 24. Consequently, we can build an ARIMA (0,0,1)(0,1,1)\[12\] model.
+
+#### Ljung-Box Test
+
+```{r}
+#| echo: true
+#| warning: false
+# ljung-box test
+checkresiduals(fit_industrial2) # ARIMA(0,0,1)(0,1,1)[12]: Pass
+```
+
+We will use the checkresiduals() function to verify if the residuals of these models meet the criteria for white noise by ljung-box test.
+
+-   H0: There is no autocorrelation in the residuals.
+
+-   H1: At least one of the autocorrelations in the residuals up to 19 lags.
+
+For pure MA model, the mean of the residual appears to be close to zero, and the variance seems to be constant. Additionally, according to the results of the Ljung-Box test, the p-value for fit_industry2 is 0.6113.  The p-value is more than 0.05, there is insufficient evidence to reject the null hypothesis, indicating that the residuals can be considered white noise, which does not require to reidentify the model.
+
+### Auto ARIMA Model
+
+```{r}
+#| echo: true
+#| warning: false
+#| include: false
+## Auto Arima Model
+# develop auto arima model
+auto_arima_industrial <- auto.arima(train_industrial) # ARIMA(1,1,1)(1,0,0)[12] 
+
+# check the result
+summary(auto_arima_industrial)
+```
+
+For auto ARIMA model, we used the auto.arima() function to build another ARIMA model. The result suggests ARIMA(1,1,1)(1,0,0)\[12\], denoted as ‘auto_arima_industrial’.
+
+#### Ljung-Test
+
+```{r}
+#| echo: true
+#| warning: false
+# ljung box test
+checkresiduals(auto_arima_industrial)
+```
+
+The residuals of the ARIMA(1,1,1)(1,0,0)\[12\] model exhibit a zero mean and constant variance, aligning with some of the assumptions of a well-behaved residual series. The histogram of the residuals shows that they are approximately normally distributed, indicating that the residuals are symmetrically centered around zero without significant skewness or kurtosis. To statistically evaluate the presence of autocorrelation in the residuals, we conducted the following hypothesis test:
+
+H₀: There is no autocorrelation in the residuals.
+
+H₁: At least one of the autocorrelations in the residuals is significant.
+
+Using the Ljung-Box test, the p-value obtained was 0.3481, which is considerably higher than the conventional significance level of α = 0.05 (Appendix 19. Therefore, we do not reject the null hypothesis. As a result, there is insufficient evidence to conclude that the residuals are not white noise.
+
+### Auto ETS Model
+
+```{r}
+#| echo: true
+#| warning: false
+## Auto ets model
+# develop auto ets model
+auto_ets_industrial <- ets(train_industrial) # ETS(M,A,A)
+
+# Check the result
+summary(auto_ets_industrial)
+```
+
+Next, we used the ets() function in R to automatically select an appropriate ETS model. The result was the ETS(M,A,A) model. Here, "M" indicates multiplicative errors, meaning that forecast errors are proportional to the level of the time series. "A" denotes an additive trend, indicating that a long-term trend is considered in the data. The final "A" indicates additive seasonality. This model is well-suited for capturing the multiplicative nature of errors and the additive trend and seasonality in the data.
+
+#### Ljung-Box Test
+
+```{r}
+#| echo: true
+#| warning: false
+# ljunb-box test
+checkresiduals(auto_ets_industrial)
+```
+
+The residuals of the ETS(M,A,A) model exhibit a zero mean and constant variance, aligning with some of the assumptions of a well-behaved residual series. The histogram of the residuals indicates that they are approximately normally distributed, suggesting that the residuals are symmetrically centered around zero, with no significant skewness or kurtosis. However, spikes are observed at the first and fourth lags in the ACF plot. Next, we performed the following hypothesis test to statistically evaluate the presence of autocorrelation in the residuals:
+
+H₀: There is no autocorrelation in the residuals.
+
+H₁: At least one of the autocorrelations in the residuals is significant up to lag 19
+
+Using the Ljung-Box test, the p-value associated with this test was 0.1134, which is higher than the conventional significance level of α = 0.05. As a result, we could not reject the null hypothesis, meaning that there is no evidence of significant autocorrelation in the residuals up to lag 19.
+
+## Model Evaluation
+
+### Forecast Interval
+
+#### Pure AR vs Pure MA Model
+
+For 𝑑=0 and 𝐷=1 ARIMA models we have, because there is no clear trend for a long-term in the data after differencing based on time series plot in Figure, therefore it is not necessary to retain the constant term. Therefore, at this stage, we estimated two pure ARIMA models using the training dataset for the Industrial sector without including constants. Two forecast model we have now are:
+
+-   ARIMA (1,0,0)(1,1,0)\[12\] without constant, denoted as ' fit_industry1'
+
+-   ARIMA (0,0,1)(0,1,1)\[12\] without constant, denoted as ' fit_industry2'
+
+```{r}
+#| echo: true
+#| warning: false
+# forecast
+fc1_industrial <- forecast(fit_industrial1, h=length(test_industrial)) # AR
+fc2_industrial <- forecast(fit_industrial2, h=length(test_industrial)) # MA
+
+# Autoplot
+autoplot(Full_Dataset_industrial) + 
+  autolayer(fc1_industrial, series =  "Pure AR Model", 
+            alpha = 0.5) +
+  autolayer(fc2_industrial, series =  "Pure MA Model", 
+            alpha = 0.5) +
+  ggtitle("Forecasts of pure AR/MA models for Industrial Sector") +
+  xlab("Time") + ylab("Total Petroleum (Thousand Barrels per Day)")
+```
+
+After the residuals check, we conduct 2 forecasts for test data of the industrial sector by using fc1_Industrial, fc2_Industrial. According to the forecast plot with the actual test data below in figure below, the forecast intervals are all within a reasonable range. Therefore, we proceed to examine the model’s goodness of fit & forecast accuracy.
+
+##### Summary
+
+```{r}
+#| echo: true
+#| warning: false
+# summary 
+summary(fc1_industrial)
+summary(fc2_industrial)
+```
+
+#### Auto ETS vs Auto ARIMA Model
+
+```{r}
+#| echo: true
+#| warning: false
+# forecast
+fc_ets_industrial <- forecast(auto_ets_industrial, h = length(test_industrial))
+fc_arima_industrial <- forecast(auto_arima_industrial, h=length(test_industrial))
+
+# Autoplot
+autoplot(Full_Dataset_industrial) + 
+  autolayer(fc_ets_industrial, series =  "Auto ETS Model", 
+            alpha = 0.5) +
+  autolayer(fc_arima_industrial, series =  "Auto ARIMA Model", 
+            alpha = 0.5) +
+  ggtitle("Forecasts of auto ETS and ARIMA models for Industrial Sector") +
+  xlab("Time") + ylab("Total Petroleum (Thousand Barrels per Day)")
+```
+
+We conduct 2 forecasts for test data of the industrial sector by using the auto ETS and auto ARIMA models. According to the forecast plot with the actual test data below in figure, the forecast intervals are all within a reasonable range. Therefore, we proceed to examine the model’s goodness of fit & forecast accuracy.
+
+##### Summary
+
+```{r}
+#| echo: true
+#| warning: false
+summary(fc_ets_industrial)
+summary(fc_arima_industrial)
+```
+
+### Goodness of Fit
+
+```{r}
+#| echo: true
+#| warning: false
+# Goodness of Fit
+GoF <- data.frame(AIC = c(fit_industrial1$aic, 
+                          fit_industrial2$aic, 
+                          auto_ets_industrial$aic, 
+                          auto_arima_industrial$aic),
+                  AICc = c(fit_industrial1$aicc, 
+                           fit_industrial2$aicc, 
+                           auto_ets_industrial$aicc, 
+                           auto_arima_industrial$aicc),
+                  BIC = c(fit_industrial1$bic, 
+                          fit_industrial2$bic, 
+                          auto_ets_industrial$bic, 
+                          auto_arima_industrial$bic))
+
+# Define row names
+row.names(GoF) <- c("Pure AR", "Pure MA", "Auto ETS", "Auto ARIMA")
+
+print(GoF)
+```
+
+According to the table, when comparing AICc, AIC, and BIC, the Pure MA Model that is ARIMA (0,0,1)(0,1,1)\[12\] model has the lowest scores compared to the other models in all metrics. Therefore, from the perspective of goodness of fit, the ARIMA (0,0,1)(0,1,1)\[12\] model is more good of fit.
+
+### Accuracy of Models (Traditional Approach)
+
+##### Pure AR Model
+
+```{r}
+#| echo: true
+#| warning: false
+accuracy(fc1_industrial, test_industrial)
+```
+
+##### Pure MA Model
+
+```{r}
+#| echo: true
+#| warning: false
+accuracy(fc2_industrial, test_industrial)
+```
+
+##### Auto ETS Model
+
+```{r}
+#| echo: true
+#| warning: false
+accuracy(fc_ets_industrial, test_industrial)
+```
+
+##### Auto ARIMA Model
+
+```{r}
+#| echo: true
+#| warning: false
+accuracy(fc_arima_industrial, test_industrial)
+```
+
+Compared to the test set, on the other hand, the Auto ETS model seems to perform best on the test set across most metrics (RMSE, MAE, MAPE, MASE, and Theil’s U). This suggests that, of the models tested, the ETS model is likely the most reliable for forecasting in this context.
+
+### Cross Validation (Modern Approrch)
+
+```{r}
+#| echo: true
+#| warning: false
+# Cross Validation (Modern Approach): MSE
+f.arima1 <- function(y, h) {
+  fit <- Arima(y, order = c(1,0,0), season = c(1,1,0))
+  forecast(fit, h = h)
+}
+cv_arima1 <- tsCV(Full_Dataset_industrial, f.arima1, h = 12) # AR
+
+
+f.arima2 <- function(y, h) {
+  fit <- Arima(y, order = c(0,0,1), season = c(0,1,1))
+  forecast(fit, h = h)
+}
+cv_arima2 <- tsCV(Full_Dataset_industrial, f.arima2, h = 12) # MA
+
+
+f.auto_ets <- function(y,h) {
+  ets(y) %>% forecast(h = h)
+}
+cv_auto_ets <- tsCV(Full_Dataset_industrial, forecastfunction = f.auto_ets, h = 12)
+
+
+f.arima_auto <- function(y, h) {
+  fit <- Arima(y, order = c(1,1,1), seasonal = c(1,0,0))
+  forecast(fit, h = h)
+}
+cv_auto_arima <- tsCV(Full_Dataset_industrial, f.arima_auto, h = 12) 
+
+
+# RMSE 
+RMSE1 <- sqrt(mean(cv_arima1^2, na.rm = TRUE)) # 306.9568
+RMSE2 <- sqrt(mean(cv_arima2^2, na.rm = TRUE)) # 297.4877
+RMSE3 <- sqrt(mean(cv_auto_ets^2, na.rm = TRUE)) # 325.2828
+RMSE4 <- sqrt(mean(cv_auto_arima^2, na.rm = TRUE)) # 272.2592
+
+CV_RMSE <- data.frame(RMSE = c(RMSE1, RMSE2, RMSE3, RMSE4))
+row.names(CV_RMSE) <- c("Pure AR", "Pure MA", "Auto ETS", "Auto ARIMA")
+print(CV_RMSE)
+```
+
+Since the auto ARIMA model has the lowest RMSE in the cross validation approach, we select the ARIMA(1,1,1)(1,0,0)\[12\] model as the champion model.
+
+## Impact Assessment
+
+We estimate the ARIMA(1,1,1)(1,0,0)\[12\] model that we selected above by employing the PreCovid data. After that, we obtain the new parameters through the Summary() function in R, resulting in the estimated model using the backshift notation:
+
+**(1 − 0.4899𝐵)(1 − 𝐵)𝑌𝑡 = (1 + 0.9576𝐵)(1 − 0.2546𝐵12) ∈𝑡**
+
+```{r}
+#| echo: true
+#| warning: false
+fc_champion_industrial <- Arima(Full_Dataset_industrial, 
+                                order = c(1,1,1), seasonal = c(1,0,0), 
+                                include.constant = F) %>% 
+  forecast(h = length(Covid_Period_industrial))
+
+# Champion model is fc_arima_industrial
+autoplot(industrial_ts_2010) +
+  autolayer(fc_champion_industrial, series = "Champion Model", alpha = 0.5) +
+  ggtitle("Performance of the Champion model for the Industrial Sector after pandemic") +
+  xlab("Time") + ylab("Total Petroleum (Thousand Barrels per Day)")
+```
+
+From the above plot, it can be observed that the total petroleum consumption in the industrial sector exceeded the 95% prediction interval significantly on three occasions. However, in all other months, it remained within the 95% interval. Additionally, since these three fluctuations did not occur consecutively, it is difficult to definitively attribute them to the impact of the COVID-19 pandemic in the long-term.
+
+```{r}
+# summary table 
+summary(fc_champion_industrial, h= length(Covid_Period_industrial))
+
+post_covid_industrial <- industrial_2010 %>%
+  mutate(Month = as.Date(Month))%>%
+  filter(Month >= "2020-01-01")
+
+point_forecasts <- fc_champion_industrial$mean
+lower_ci <- fc_champion_industrial$lower[, 2]
+upper_ci <- fc_champion_industrial$upper[, 2]
+
+results_industrial <- data.frame(
+  Point_Forecasts = point_forecasts,
+  Lower_95_CI = lower_ci,
+  Upper_95_CI = upper_ci
+)
+
+
+Interval_Industrial <- bind_cols(post_covid_industrial, results_industrial) %>%
+  mutate(
+    Difference = as.numeric(Value) - as.numeric(Point_Forecasts),
+    Outlier = case_when(
+      Value < Lower_95_CI ~ "Lower",
+      Value > Upper_95_CI ~ "Higher",
+      TRUE ~ "")) %>%
+  filter(Month < "2023-01-01") %>%
+  filter(Outlier != "")
+
+print(Interval_Industrial)
+```
+
+The three significant drops in oil consumption in the U.S. industrial sector observed in April 2020, February 2021, and December 2022 can be attributed to several events. On March 15, 2020, the COVID-19 pandemic led to widespread lockdowns, halting industrial activities causing a sharp decline in oil demand and even temporarily pushing oil prices into negative territory (David, 2023). In February 2021, a severe winter storm in Texas disrupted oil production and refinery operations, resulting in a reduction in consumption (Flores & McBrien, 2023). While the direct cause is uncertain, in December 2022, concerns over a global economic downturn, inflation, and geopolitical risks stemming from Russia’s invasion of Ukraine led to reduced oil demand, further contributing to the decline in consumption. These overlapping factors likely caused significant drops in oil consumption during these periods. Although there was a significant drop in oil consumption in April 2020, it returned to within the 95% prediction interval in the following month. This suggests that the initial impact of the pandemic on oil consumption in the industrial sector was short-term, and the sector began to stabilize relatively quickly after the initial shock. Therefore, we look at the duration from January 2020 to December 2020 in the table below to see the effect by COVID-19 pandemic more directly.
+
+## Conclusion
+
+This report focused on examining the impacts of COVID-19 on energy consumption patterns in the industrial sector using ARIMA models for forecasting.
+
+For the industrial sector, an ARIMA(1,1,1)(1,0,0)\[12\] model was employed to assess petroleum consumption trends during the pandemic. The model indicated that, while the sector experienced notable drops in oil consumption in specific months—namely, April 2020, February 2021, and December 2022—these fluctuations resulted from a combination of the pandemic's effects, weather disruptions, and geopolitical risks. Despite these disruptions, the model demonstrated a swift recovery, with consumption quickly returning to the forecasted range after each shock. The overall forecast error remained low at 1.550%, suggesting that the pandemic's impact on industrial energy consumption was brief and largely resilient.
+
+In summary, while the industrial sector faced temporary consumption shocks during the pandemic, these were short-lived, and energy usage stabilized relatively quickly. This resilience highlights the sector's adaptability, with additional fluctuations driven by factors beyond the pandemic itself.
+
+## Reference
+
+Colander, D., Goldberg, M., Haas, A., Juselius, K., Kirman, A., Lux, T., & Sloth, B. (2009). THE FINANCIAL CRISIS AND THE SYSTEMIC FAILURE OF THE ECONOMICS PROFESSION. Critical Review, 21(2-3), 249–267. https://doi.org/10.1080/08913810902934109
+
+David, J. ((2023, March 15). CDC Museum COVID-19 timeline. https://www.cdc.gov/museum/timeline/covid19.html#:\~:text=March%2015%2C%202020,restaurants%20and%20bars%20to%20close.
+
+Flores, N. M., & McBrien, H. (2023). The 2021 Texas power crisis: Distribution, duration, and disparities. Journal of Exposure Science & Environmental Epidemiology, 33(1), 21-31. https://doi.org/10.1038/s41370-022-00462-5
+
+Hyndman, R. J., & Athanasopoulos, G. (2021). Forecasting: Principles and practice (3rd ed.). OTexts. https://otexts.com/fpp3/
